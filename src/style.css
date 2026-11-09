@@ -1,0 +1,114 @@
+:root {
+  --bg: #eeece6;
+  --panel: rgba(252, 252, 251, 0.92);
+  --ink: #0b0b0b;
+  --ink2: #52514e;
+  --grid: #e6e5e0;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --accent: #ff4f8b;
+  --pass: #0a7d32;
+  --fail: #c0262d;
+  --obs: #8a6d00;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --panel: rgba(26, 26, 25, 0.9);
+    --ink: #f0efec;
+    --ink2: #c3c2b7;
+    --grid: #33332f;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --pass: #4cc46b;
+    --fail: #ff6b6b;
+    --obs: #e5bf3c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --panel: rgba(26, 26, 25, 0.9);
+  --ink: #f0efec;
+  --ink2: #c3c2b7;
+  --grid: #33332f;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
+  font-family: 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif; touch-action: none; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#loading { position: fixed; inset: 0; display: grid; place-items: center; font-size: 18px; background: var(--bg); z-index: 50; }
+.hidden { display: none !important; }
+
+#hud { position: fixed; top: 12px; left: 12px; max-width: min(380px, calc(100vw - 24px)); background: var(--panel);
+  border-radius: 12px; padding: 10px 12px; box-shadow: 0 4px 18px rgba(0,0,0,.12); backdrop-filter: blur(6px); z-index: 5; }
+#hud .title { font-weight: 800; font-size: 15px; }
+#hud .sub { display: block; font-weight: 500; font-size: 11.5px; color: var(--ink2); margin-top: 2px; }
+#state { display: inline-block; margin: 8px 0 6px; padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 13px;
+  background: var(--accent); color: #fff; }
+#state[data-state='aim'] { background: #1baf7a; }
+#state[data-state='descent'], #state[data-state='close'] { background: #eb6834; }
+#readout { font-size: 12px; line-height: 1.55; color: var(--ink2); font-variant-numeric: tabular-nums; }
+#readout b { color: var(--ink); }
+#slow { margin-top: 6px; font-size: 12px; color: var(--fail); font-weight: 700; }
+
+#won { position: fixed; top: 12px; right: 316px; background: var(--panel); border-radius: 12px; padding: 8px 12px; min-width: 130px;
+  max-height: 40vh; overflow: auto; z-index: 5; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+.won-title { font-weight: 700; font-size: 13px; }
+#won-list { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; }
+#won-list:empty::after { content: '尚無'; color: var(--ink2); margin-left: -18px; }
+
+#telemetry { position: fixed; left: 12px; bottom: 12px; width: min(360px, calc(100vw - 24px)); height: 250px; background: var(--panel);
+  border-radius: 12px; padding: 6px; z-index: 5; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+#telemetry canvas { width: 100%; height: 100%; display: block; }
+
+#help { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); border-radius: 10px;
+  padding: 6px 12px; font-size: 12px; color: var(--ink2); z-index: 4; text-align: center; }
+
+#joystick { position: fixed; left: 24px; bottom: 24px; width: 132px; height: 132px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,0,0,.18), rgba(0,0,0,.32)); display: none; z-index: 6; touch-action: none; }
+#knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff6b78, #c4001b); box-shadow: 0 4px 10px rgba(0,0,0,.35); pointer-events: none; }
+#drop { position: fixed; right: 28px; bottom: 28px; width: 104px; height: 104px; border-radius: 50%; border: 6px solid #ffd400;
+  background: radial-gradient(circle at 35% 30%, #ff5a6a, #c4001b); color: #fff; font-size: 20px; font-weight: 900; letter-spacing: 2px;
+  box-shadow: 0 6px 0 #8f0014, 0 10px 20px rgba(0,0,0,.3); z-index: 6; cursor: pointer; font-family: inherit; touch-action: none; }
+#drop.pressed { transform: translateY(5px); box-shadow: 0 1px 0 #8f0014, 0 4px 10px rgba(0,0,0,.3); }
+
+#toast { position: fixed; top: 42%; left: 50%; transform: translate(-50%, -50%) scale(.8); background: #ffd400; color: #6b0021;
+  font-weight: 900; font-size: 26px; padding: 14px 26px; border-radius: 16px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 20; }
+#toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+.lil-gui.root { z-index: 10; max-height: calc(100vh - 24px); overflow-y: auto; top: 12px !important; right: 12px !important; }
+
+#tests { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 30; display: grid; place-items: center; padding: 16px; }
+.tests-card { position: relative; background: var(--bg); color: var(--ink); width: min(780px, 100%); max-height: 100%; overflow: auto;
+  border-radius: 14px; padding: 18px 16px; }
+#tests-close { position: absolute; right: 12px; top: 10px; border: 0; background: transparent; font-size: 20px; cursor: pointer; color: var(--ink); }
+.tests-head h2 { margin: 0 0 4px; font-size: 19px; }
+.tests-head p, #tests-body section p { color: var(--ink2); font-size: 13.5px; line-height: 1.55; }
+#tests-body section { background: var(--panel); border-radius: 10px; padding: 12px; margin: 12px 0; }
+#tests-body h3 { font-size: 15px; margin: 0; }
+.tag { font-weight: 800; font-size: 11.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid currentColor; margin-right: 8px; }
+.tag.pass { color: var(--pass); } .tag.fail { color: var(--fail); } .tag.obs { color: var(--obs); }
+.chart { position: relative; margin-top: 8px; }
+.chart-tip { position: absolute; display: none; background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px;
+  font-size: 12px; pointer-events: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.running { font-weight: 700; }
+
+/* 觸控裝置：顯示虛擬搖桿，隱藏鍵盤說明 */
+@media (pointer: coarse) {
+  #joystick { display: block; }
+  #help { display: none; }
+  #telemetry { display: none; }
+  #won { right: 12px; top: auto; bottom: 150px; }
+}
+@media (max-width: 720px) {
+  #won { right: 12px; top: auto; bottom: 150px; }
+  #telemetry { display: none; }
+  #help { display: none; }
+}

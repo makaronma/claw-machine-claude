@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>夾娃娃機物理實驗場</title>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="loading">載入物理引擎中…</div>
+
+    <header id="hud">
+      <div class="title">夾娃娃機 Physics Lab <span class="sub">DL-G2-BASE 鼎莉二代手冊基準機</span></div>
+      <div id="state" data-state="aim">瞄準</div>
+      <div id="readout"></div>
+      <div id="slow" class="hidden">⚠ 效能不足：物理以較慢速度執行（未改變物理參數）</div>
+    </header>
+
+    <aside id="won">
+      <div class="won-title">已出貨</div>
+      <ul id="won-list"></ul>
+    </aside>
+
+    <div id="telemetry"><canvas id="telemetry-canvas"></canvas></div>
+
+    <div id="help">
+      <b>操作</b>　WASD／方向鍵：移動天車　Space：下爪（下爪中再按一次＝二收）<br>
+      滑鼠拖曳：旋轉視角　1~4：切換視角　P：暫停　.：單步
+    </div>
+
+    <div id="joystick"><div id="knob"></div></div>
+    <button id="drop" aria-label="下爪">下爪</button>
+    <div id="toast"></div>
+
+    <div id="tests" class="hidden">
+      <div class="tests-card">
+        <button id="tests-close" aria-label="關閉">✕</button>
+        <div id="tests-body"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
