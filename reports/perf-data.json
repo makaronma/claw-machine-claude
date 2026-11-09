@@ -1,0 +1,16 @@
+{
+  "measuredAt": "2026-11-10",
+  "physicsMsPerStep": {
+    "note": "Node 26, Apple Silicon, 120 Hz step; tests/bench.ts",
+    "before": { "standard-idle": 1.134, "standard-grab": 1.121, "feet-idle": 0.855, "feet-grab": 0.771, "tailgroove-idle": 1.046, "tailgroove-grab": 1.044 },
+    "after":  { "standard-idle": 0.205, "standard-grab": 0.555, "feet-idle": 0.463, "feet-grab": 0.446, "tailgroove-idle": 0.222, "tailgroove-grab": 0.399 }
+  },
+  "settleMs": { "before": { "standard": 484, "feet": 361, "tailgroove": 363 }, "after": { "standard": 183, "feet": 138, "tailgroove": 128 } },
+  "browser": {
+    "note": "headless Chrome + SwiftShader (software GL), 1440x900; GPU timings not representative of real devices",
+    "drawCalls": { "before": 259, "after": 161 },
+    "rendersPer5sIdle": { "before": 9, "after": 0 },
+    "rendersPer5sMoving": { "before": 9, "after": 14 },
+    "jsHeapMB": { "before": 11.3, "after": 9.2 }
+  }
+}

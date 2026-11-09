@@ -28,11 +28,17 @@ export interface MachineProfile {
     speedDown: number; speedUp: number; // 控制值 0~255
     releaseSeconds: number;
     secondClawEnabled: boolean;
+    // 保證取物（保夾）：累計投幣達保證價後，爪力轉為全力直到出貨（金額歸零）
+    guaranteeEnabled: boolean;
+    guaranteePrice: number; // NT$，經濟部函釋原則上限 790
+    pricePerPlay: number; // NT$／次
+    guaranteePower: number; // 保夾後 P1~P4 爪力
   };
   physics: {
     gravity: number;
     hz: number;
-    solverIterations: number;
+    solverIterations: number; // 全域 PGS 迭代
+    clawExtraIterations: number; // 爪子連桿所在 island 額外迭代（閉迴路需要較多迭代才不漂移）
     trolleyMaxSpeedAt255: number; // m/s，控制值 255 對應速度
     trolleyAccel: number; trolleyBrake: number; // m/s²
     trolleyY: number; // 天車吊點高度
@@ -78,11 +84,16 @@ export const DL_G2_BASE: MachineProfile = {
     speedDown: 255, speedUp: 255,
     releaseSeconds: 1.2,
     secondClawEnabled: true,
+    guaranteeEnabled: true,
+    guaranteePrice: 250,
+    pricePerPlay: 10,
+    guaranteePower: 255,
   },
   physics: {
     gravity: 9.81,
     hz: 120,
-    solverIterations: 32,
+    solverIterations: 8,
+    clawExtraIterations: 24,
     trolleyMaxSpeedAt255: 0.3,
     trolleyAccel: 1.2, trolleyBrake: 2.0,
     trolleyY: 1.56,
@@ -127,6 +138,8 @@ export const PARAM_SOURCES: Record<string, { src: ParamSource; note: string }> =
   'controller.speedBackward': { src: 'manual', note: '控制值 120' },
   'controller.speedLeft': { src: 'manual', note: '控制值 170' },
   'controller.speedRight': { src: 'manual', note: '控制值 170' },
+  'controller.guaranteePrice': { src: 'other-ref', note: '實拍機台標示 250 元（irenebrination 2023）；經濟部 2018 函釋原則上限 790 元' },
+  'controller.pricePerPlay': { src: 'other-ref', note: '台灣常見 NT$10／次' },
   'physics.solenoidVoltage': { src: 'manual', note: '接線圖標示 +48V（不代表每階段都輸出 48V）' },
 };
 export const sourceOf = (path: string): ParamSource => PARAM_SOURCES[path]?.src ?? 'assumption';

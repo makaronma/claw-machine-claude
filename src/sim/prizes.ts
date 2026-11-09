@@ -11,7 +11,7 @@ type R = typeof RAPIER_NS;
  * 尺寸與質量為合理假設，尚未實測。
  */
 
-export type BoxArt = 'figure' | 'earbuds' | 'fan' | 'thin' | 'long' | 'blind';
+export type BoxArt = 'figure' | 'earbuds' | 'fan' | 'thin' | 'long' | 'blind' | 'snack' | 'tin' | 'bigfig' | 'can' | 'capsule' | 'pillow';
 export type PlushKind = 'bear' | 'dino' | 'longcat';
 
 export interface BoxSpec {
@@ -22,6 +22,11 @@ export interface BoxSpec {
   mass: number;
   comOffset: V3;
   friction: number;
+  /** 碰撞形狀：cuboid（預設）、cylinder（size.x = 直徑, size.y = 高）、ball（size.x = 直徑） */
+  shape?: 'cuboid' | 'cylinder' | 'ball';
+  restitution?: number;
+  /** 角阻尼：Rapier 沒有滾動阻力，球形獎品用它模擬（假設值） */
+  angularDamping?: number;
 }
 
 export interface PartVisual {
@@ -32,6 +37,8 @@ export interface PartVisual {
   dir: V3; // capsule 方向（部件座標）
   color: number;
   side?: number; // 左右
+  /** 同一剛體上的附加碰撞形狀（例如恐龍短腿），offset 相對本部件 */
+  extras?: { shape: 'ball' | 'capsule'; offset: V3; radius: number; halfHeight: number; dir: V3; color: number }[];
 }
 
 export interface PrizePart {
@@ -65,6 +72,13 @@ export const BOX_SPECS: Record<BoxArt, BoxSpec> = {
   thin: { kind: 'box', art: 'thin', label: '薄型彩盒', size: v3(0.15, 0.21, 0.035), mass: 0.17, comOffset: v3(0, 0, 0), friction: 0.45 },
   long: { kind: 'box', art: 'long', label: '長型彩盒', size: v3(0.32, 0.085, 0.085), mass: 0.33, comOffset: v3(0.03, 0, 0), friction: 0.45 },
   blind: { kind: 'box', art: 'blind', label: '小盲盒', size: v3(0.07, 0.07, 0.07), mass: 0.08, comOffset: v3(0, 0, 0), friction: 0.45 },
+  // 以下依實拍照片新增（research/real-world-reference.md）；尺寸質量為合理假設
+  snack: { kind: 'box', art: 'snack', label: '可可脆片零食盒', size: v3(0.13, 0.19, 0.035), mass: 0.11, comOffset: v3(0, 0, 0), friction: 0.4 },
+  tin: { kind: 'box', art: 'tin', label: '印花鐵盒', size: v3(0.12, 0.085, 0.09), mass: 0.28, comOffset: v3(0, -0.01, 0), friction: 0.28 },
+  bigfig: { kind: 'box', art: 'bigfig', label: '大型景品公仔盒', size: v3(0.16, 0.25, 0.12), mass: 0.48, comOffset: v3(0, -0.04, 0), friction: 0.38 },
+  can: { kind: 'box', art: 'can', label: '罐裝氣泡飲', size: v3(0.066, 0.123, 0.066), mass: 0.37, comOffset: v3(0, 0, 0), friction: 0.3, shape: 'cylinder' },
+  capsule: { kind: 'box', art: 'capsule', label: '扭蛋殼', size: v3(0.08, 0.08, 0.08), mass: 0.05, comOffset: v3(0, -0.008, 0), friction: 0.22, shape: 'ball', restitution: 0.25, angularDamping: 2.5 },
+  pillow: { kind: 'box', art: 'pillow', label: '大頭抱枕', size: v3(0.2, 0.2, 0.07), mass: 0.13, comOffset: v3(0, 0, 0), friction: 0.9, restitution: 0.02 },
 };
 
 export interface Pose { pos: V3; rot: Q4 }
@@ -78,16 +92,29 @@ export function spawnBox(RAPIER: R, world: RAPIER_NS.World, spec: BoxSpec, pose:
       .setTranslation(pose.pos.x, pose.pos.y, pose.pos.z)
       .setRotation(pose.rot)
       .setLinearDamping(0.05)
-      .setAngularDamping(0.1),
+      .setAngularDamping(spec.angularDamping ?? 0.1),
   );
   const { x: w, y: h, z: d } = spec.size;
   const m = spec.mass;
-  const inertia = v3((m / 12) * (h * h + d * d), (m / 12) * (w * w + d * d), (m / 12) * (w * w + h * h));
+  let desc: RAPIER_NS.ColliderDesc, inertia: V3;
+  if (spec.shape === 'cylinder') {
+    const r = w / 2;
+    inertia = v3((m * (3 * r * r + h * h)) / 12, (m * r * r) / 2, (m * (3 * r * r + h * h)) / 12);
+    desc = RAPIER.ColliderDesc.cylinder(h / 2, r);
+  } else if (spec.shape === 'ball') {
+    const r = w / 2;
+    const I = 0.5 * m * r * r; // 薄殼＋內容物，介於實心球與薄殼之間
+    inertia = v3(I, I, I);
+    desc = RAPIER.ColliderDesc.ball(r);
+  } else {
+    inertia = v3((m / 12) * (h * h + d * d), (m / 12) * (w * w + d * d), (m / 12) * (w * w + h * h));
+    desc = RAPIER.ColliderDesc.cuboid(w / 2, h / 2, d / 2);
+  }
   world.createCollider(
-    RAPIER.ColliderDesc.cuboid(w / 2, h / 2, d / 2)
+    desc
       .setMassProperties(m, spec.comOffset, inertia, { x: 0, y: 0, z: 0, w: 1 })
       .setFriction(spec.friction)
-      .setRestitution(0.1)
+      .setRestitution(spec.restitution ?? 0.1)
       .setCollisionGroups(GROUP_PRIZE),
     body,
   );
@@ -98,7 +125,9 @@ export function spawnBox(RAPIER: R, world: RAPIER_NS.World, spec: BoxSpec, pose:
 }
 
 // ------------------------------------------------------------------ plush
+interface ExtraDef { shape: 'ball' | 'capsule'; pos: V3; radius: number; halfHeight?: number; dir?: V3; color: number; mass: number }
 interface PartDef {
+  extras?: ExtraDef[];
   key: string;
   role: PartVisual['role'];
   shape: 'ball' | 'capsule';
@@ -138,18 +167,16 @@ function plushDef(spec: PlushSpec): { parts: PartDef[]; joints: JointDef[] } {
   if (spec.plush === 'dino') {
     // 長尾小恐龍：四腳站姿，頭朝 -z，長尾巴向 +z
     const parts: PartDef[] = [
-      { key: 'torso', role: 'torso', shape: 'capsule', pos: P(0, 0.05, 0), radius: 0.038 * s, halfHeight: 0.03 * s, dir: v3(0, 0, 1), mass: 0.07 * s ** 3, color: col },
+      // 短腿直接做成軀幹的複合碰撞體：四隻彈簧腿＋尾巴同時著地會過度拘束而持續抖動
+      { key: 'torso', role: 'torso', shape: 'capsule', pos: P(0, 0.05, 0), radius: 0.038 * s, halfHeight: 0.03 * s, dir: v3(0, 0, 1), mass: 0.07 * s ** 3, color: col,
+        extras: [-1, 1].flatMap((sx) => [-1, 1].map((sz) => ({ shape: 'capsule' as const, pos: P(0.026 * sx, 0.016, 0.03 * sz), radius: 0.014 * s, halfHeight: 0.006 * s, dir: v3(0, 1, 0), color: col, mass: 0.006 * s ** 3 }))) },
       { key: 'head', role: 'head', shape: 'ball', pos: P(0, 0.085, -0.085), radius: 0.04 * s, mass: 0.035 * s ** 3, color: col },
-      ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => ({
-        key: `leg${sx}${sz}`, role: 'leg' as const, shape: 'capsule' as const, pos: P(0.026 * sx, 0.016, 0.03 * sz), radius: 0.014 * s, halfHeight: 0.006 * s, dir: v3(0, 1, 0), mass: 0.006 * s ** 3, color: col, side: sx,
-      }))),
       { key: 'tail1', role: 'tail', shape: 'capsule', pos: P(0, 0.045, 0.085), radius: 0.026 * s, halfHeight: 0.022 * s, dir: v3(0, -0.2, 1), mass: 0.014 * s ** 3, color: col },
       { key: 'tail2', role: 'tail', shape: 'capsule', pos: P(0, 0.035, 0.145), radius: 0.019 * s, halfHeight: 0.02 * s, dir: v3(0, -0.2, 1), mass: 0.008 * s ** 3, color: col },
       { key: 'tail3', role: 'tail', shape: 'capsule', pos: P(0, 0.027, 0.195), radius: 0.012 * s, halfHeight: 0.018 * s, dir: v3(0, -0.1, 1), mass: 0.004 * s ** 3, color: acc },
     ];
     const joints: JointDef[] = [
       { a: 'torso', b: 'head', anchor: P(0, 0.075, -0.055), axis: v3(1, 0, 0), lim: 0.5, k: 50, c: 2 },
-      ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => ({ a: 'torso', b: `leg${sx}${sz}`, anchor: P(0.026 * sx, 0.028, 0.03 * sz), axis: v3(1, 0, 0), lim: 0.6, k: 30, c: 1 }))),
       { a: 'torso', b: 'tail1', anchor: P(0, 0.05, 0.058), axis: v3(0, 1, 0), lim: 0.7, k: 30, c: 1 },
       { a: 'tail1', b: 'tail2', anchor: P(0, 0.04, 0.115), axis: v3(0, 1, 0), lim: 0.8, k: 22, c: 0.8 },
       { a: 'tail2', b: 'tail3', anchor: P(0, 0.031, 0.17), axis: v3(1, 0, 0), lim: 0.8, k: 15, c: 0.6 },
@@ -178,16 +205,24 @@ export function spawnPlush(RAPIER: R, world: RAPIER_NS.World, spec: PlushSpec, p
   for (const p of def.parts) {
     const wp = add(pose.pos, qRotate(pose.rot, p.pos));
     const body = world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic().setTranslation(wp.x, wp.y, wp.z).setRotation(pose.rot).setLinearDamping(0.2).setAngularDamping(0.6),
+      RAPIER.RigidBodyDesc.dynamic().setTranslation(wp.x, wp.y, wp.z).setRotation(pose.rot)// 布料內摩擦：只加角阻尼（線性阻尼會拖慢自由落下，不物理）
+      .setLinearDamping(0.2).setAngularDamping(2.0),
     );
     const dir = p.dir ?? v3(0, 1, 0);
     const desc = p.shape === 'ball'
       ? RAPIER.ColliderDesc.ball(p.radius)
       : RAPIER.ColliderDesc.capsule(p.halfHeight ?? 0.01, p.radius).setRotation(qFromYTo(dir));
     // 布料：高摩擦、低反彈（假設值）
-    world.createCollider(desc.setMass(p.mass).setFriction(0.85).setRestitution(0.02).setCollisionGroups(group), body);
+    // 部件最小 10 g：質量比太懸殊時 PGS 關節會持續抖動
+    world.createCollider(desc.setMass(Math.max(p.mass, 0.01)).setFriction(0.85).setRestitution(0.02).setCollisionGroups(group), body);
+    for (const e of p.extras ?? []) {
+      const off = sub(e.pos, p.pos);
+      const ed = e.shape === 'ball' ? RAPIER.ColliderDesc.ball(e.radius) : RAPIER.ColliderDesc.capsule(e.halfHeight ?? 0.01, e.radius).setRotation(qFromYTo(e.dir ?? v3(0, 1, 0)));
+      world.createCollider(ed.setTranslation(off.x, off.y, off.z).setMass(Math.max(e.mass, 0.005)).setFriction(0.85).setRestitution(0.02).setCollisionGroups(group), body);
+    }
     bodies.set(p.key, { body, def: p });
-    parts.push({ body, visual: { role: p.role, shape: p.shape, radius: p.radius, halfHeight: p.halfHeight ?? 0, dir, color: p.color, side: p.side } });
+    parts.push({ body, visual: { role: p.role, shape: p.shape, radius: p.radius, halfHeight: p.halfHeight ?? 0, dir, color: p.color, side: p.side,
+      extras: p.extras?.map((e) => ({ shape: e.shape, offset: sub(e.pos, p.pos), radius: e.radius, halfHeight: e.halfHeight ?? 0, dir: e.dir ?? v3(0, 1, 0), color: e.color })) } });
   }
   // 布偶關節：impulse revolute。注意 Rapier JS 0.14 的 JointData.intoRaw() 會忽略
   // revolute 的 limits，必須在建立後呼叫 setLimits()，否則頭／四肢會轉到塌陷。

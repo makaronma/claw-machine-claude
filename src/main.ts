@@ -7,10 +7,9 @@ import { Sim } from './sim/sim';
 import { DL_G2_BASE, MachineProfile, cloneProfile, sourceOf } from './sim/profile';
 import { LAYOUTS } from './sim/layouts';
 import { STATE_LABEL } from './sim/firmware';
-import { ALL_TESTS, TestResult } from './sim/tests';
 import { DebugView, MachineScene, buildStore, setupLights } from './render/scene';
 import { InputState } from './ui/input';
-import { TelemetryPanel, showTestResults } from './ui/hud';
+import { TelemetryPanel } from './ui/hud';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -18,21 +17,26 @@ await RAPIER.init();
 
 // ------------------------------------------------------------------ 模擬
 let editProf: MachineProfile = cloneProfile(DL_G2_BASE);
-const sim = new Sim(RAPIER, editProf, 'standard');
+const sim = new Sim(RAPIER, editProf, 'snackstack');
 sim.settle(2.5);
 
 // ------------------------------------------------------------------ 渲染
 const canvas = $<HTMLCanvasElement>('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+// 解析度：高 DPI 上限 1.5，之後依實際幀時間自動調整（見 adaptiveResolution）
+let pixelRatio = Math.min(1.5, window.devicePixelRatio || 1);
+renderer.setPixelRatio(pixelRatio);
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.autoUpdate = false; // 只有東西在動時才重畫陰影
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMapping = THREE.NeutralToneMapping; // ACES 會讓亮黃機身與彩盒褪色
+renderer.toneMappingExposure = 0.92;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xeeece6);
 const camera = new THREE.PerspectiveCamera(42, 1, 0.02, 30);
 const controls = new OrbitControls(camera, canvas);
+let viewDirty = true; // 視角或 UI 改變 → 需要重繪
+controls.addEventListener('change', () => { viewDirty = true; });
 controls.enableDamping = true;
 controls.minDistance = 0.35;
 controls.maxDistance = 3.5;
@@ -65,6 +69,7 @@ function resize() {
   // 直式手機：拉遠一點讓整台機器入鏡
   camera.fov = w < h ? 58 : 42;
   camera.updateProjectionMatrix();
+  viewDirty = true;
 }
 window.addEventListener('resize', resize);
 resize();
@@ -87,7 +92,7 @@ input.onKey = (k) => {
 
 // ------------------------------------------------------------------ 面板
 const opts = {
-  layout: 'standard',
+  layout: 'snackstack',
   machinePreset: '原廠設定（手冊）',
   timeScale: 1,
   paused: false,
@@ -106,7 +111,7 @@ let stepOnce = false;
 const MACHINE_PRESETS: Record<string, Partial<MachineProfile['controller']>> = {
   '原廠設定（手冊）': { P1: 255, P2: 200, P3: 45, P4: 45 },
   '全程強爪（示意）': { P1: 255, P2: 255, P3: 255, P4: 255 },
-  '弱爪台（示意）': { P1: 170, P2: 120, P3: 30, P4: 30 },
+  '摸摸爪（台主常見）': { P1: 190, P2: 110, P3: 25, P4: 25 },
 };
 
 const gui = new GUI({ title: '控制面板', width: 300 });
@@ -146,6 +151,11 @@ for (const [k, label, lo, hi, st] of ctlKeys) {
   fCtl.add(editProf.controller, k, lo, hi, st).name(`${label} ${tag(`controller.${k}`)}`).onChange((v: number) => { (sim.prof.controller as unknown as Record<string, number>)[k] = v; });
 }
 fCtl.add(editProf.controller, 'secondClawEnabled').name('二收（下爪中再按一次）').onChange((v: boolean) => { sim.prof.controller.secondClawEnabled = v; });
+const fG = gui.addFolder('保證取物（保夾）');
+fG.add(editProf.controller, 'guaranteeEnabled').name('啟用保夾').onChange((v: boolean) => { sim.prof.controller.guaranteeEnabled = v; });
+fG.add(editProf.controller, 'guaranteePrice', 10, 790, 10).name(`保證價 NT$ ${tag('controller.guaranteePrice')}`).onChange((v: number) => { sim.prof.controller.guaranteePrice = v; });
+fG.add(editProf.controller, 'pricePerPlay', 5, 50, 5).name(`每次 NT$ ${tag('controller.pricePerPlay')}`).onChange((v: number) => { sim.prof.controller.pricePerPlay = v; });
+fG.add(editProf.controller, 'guaranteePower', 100, 255, 1).name('保夾後爪力').onChange((v: number) => { sim.prof.controller.guaranteePower = v; });
 fCtl.close();
 
 // 物理參數：需要重建
@@ -169,6 +179,7 @@ fPhy.close();
 const fTest = gui.addFolder('物理測試');
 fTest.add(opts, 'runTests').name('▶ 執行 6 項測試（約 10 秒）');
 
+gui.onChange(() => { viewDirty = true; });
 function refreshGui() { gui.controllersRecursive().forEach((c) => c.updateDisplay()); }
 
 function rebuild() {
@@ -182,6 +193,8 @@ function rebuild() {
   scene.add(ms.root);
   debug.clearTrail();
   sim.onWin = onWin;
+  viewDirty = true;
+  shadowStale = true;
   wonList.innerHTML = '';
 }
 
@@ -202,6 +215,9 @@ const stateEl = $('state'), readout = $('readout'), slowEl = $('slow');
 
 // ------------------------------------------------------------------ 物理測試（瀏覽器內執行）
 async function runTests() {
+  // 測試模組延遲載入，不佔首次載入的 bundle
+  const [{ ALL_TESTS }, { showTestResults }] = await Promise.all([import('./sim/tests'), import('./ui/hud')]);
+  type TestResult = ReturnType<(typeof ALL_TESTS)[number]>;
   const overlay = $('tests');
   const body = $('tests-body');
   overlay.classList.remove('hidden');
@@ -222,7 +238,22 @@ let last = performance.now();
 const MAX_STEPS = 6;
 const joystickMesh = () => ms.root.getObjectByName('joystick');
 const dropMesh = () => ms.root.getObjectByName('dropButton');
+let lastHud = 0, lastTel = 0, renderedFrames = 0, shadowStale = true;
+// 自動解析度：連續 1.5 秒平均幀間隔 > 24 ms 就降 0.25（最低 0.75）；很順時慢慢升回
+let frameAvg = 16, lowSince = 0, highSince = 0;
+function adaptiveResolution(dt: number) {
+  frameAvg = frameAvg * 0.95 + dt * 1000 * 0.05;
+  const t = performance.now();
+  const maxPR = Math.min(1.5, window.devicePixelRatio || 1);
+  if (frameAvg > 24) { highSince = 0; lowSince ||= t; if (t - lowSince > 1500 && pixelRatio > 0.75) { pixelRatio = Math.max(0.75, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); resize(); lowSince = 0; } }
+  else if (frameAvg < 14) { lowSince = 0; highSince ||= t; if (t - highSince > 4000 && pixelRatio < maxPR) { pixelRatio = Math.min(maxPR, pixelRatio + 0.25); renderer.setPixelRatio(pixelRatio); resize(); highSince = 0; } }
+  else { lowSince = 0; highSince = 0; }
+}
+const perf = { phys: 0, render: 0, hud: 0, frame: 0, calls: 0, tris: 0, steps: 0, rendered: 0, pixelRatio: 1 };
+(window as unknown as { __perf: typeof perf }).__perf = perf;
+const ema = (k: keyof typeof perf, v: number) => { perf[k] = perf[k] * 0.9 + v * 0.1; };
 function frame(now: number) {
+  const tF0 = performance.now();
   const realDt = Math.max(0, Math.min(0.1, (now - last) / 1000));
   last = now;
   sim.input.dirX = input.dirX;
@@ -239,6 +270,7 @@ function frame(now: number) {
     steps = 1;
   }
   stepOnce = false;
+  const tP1 = performance.now();
   ms.update();
   const hp = sim.machine.head.translation();
   if (steps && opts.showTrail) debug.pushTrail(hp.x, hp.y, hp.z);
@@ -254,20 +286,39 @@ function frame(now: number) {
     controls.target.lerp(new THREE.Vector3(hp.x, hp.y - 0.1, hp.z), 0.08);
   }
   controls.update();
-  renderer.render(scene, camera);
+  // 畫面完全靜止（瞄準中、爪子不動、獎品都在睡）且視角沒變 → 跳過渲染，省電
+  const quiet = steps === 0 || sim.isQuiet();
+  const tR0 = performance.now();
+  if (!quiet || viewDirty || opts.followClaw) {
+    if (!quiet || shadowStale) { renderer.shadowMap.needsUpdate = true; shadowStale = !quiet; }
+    renderer.render(scene, camera);
+    renderedFrames++;
+    viewDirty = false;
+  }
+  const tR1 = performance.now();
+  adaptiveResolution(realDt);
 
-  // HUD
+  // HUD：文字 10 Hz、遙測圖 20 Hz（每幀改 innerHTML／重畫 canvas 很貴）
   const t = sim.telemetry.at(-1);
-  stateEl.textContent = `${STATE_LABEL[sim.firmware.state]}${opts.paused ? '（暫停）' : ''}`;
-  stateEl.dataset.state = sim.firmware.state;
-  if (t) {
+  const hudDue = now - lastHud > 100, telDue = now - lastTel > 50;
+  if (hudDue) {
+    lastHud = now;
+    stateEl.textContent = `${STATE_LABEL[sim.firmware.state]}${opts.paused ? '（暫停）' : ''}`;
+    stateEl.dataset.state = sim.firmware.state;
+  }
+  if (t && hudDue) {
     readout.innerHTML =
-      `嘗試 <b>${sim.firmware.attempts}</b>　出貨 <b>${sim.wonCount}</b><br>` +
+      `嘗試 <b>${sim.firmware.attempts}</b>　出貨 <b>${sim.wonCount}</b>　已投 <b>NT$${sim.firmware.totalSpent}</b><br>` +
+      (sim.prof.controller.guaranteeEnabled ? (sim.firmware.guaranteeActive ? '<b class="g-on">保夾中：本次全力爪</b><br>' : `距保夾 NT$${sim.firmware.creditsToGuarantee()}（累計 ${sim.firmware.credits}）<br>`) : '') +
       `鋼索 L ${(t.cableLength * 100).toFixed(1)} cm　張力 ${t.tension.toFixed(2)} N<br>` +
       `爪力 P ${sim.machine.solenoid.command}　電流 ${t.current.toFixed(2)} A　電磁力 ${t.solenoidForce.toFixed(1)} N<br>` +
       `三爪閉合 ${(t.legAngle * 57.3).toFixed(0)}°　模擬時間 ${sim.time.toFixed(1)} s`;
   }
-  if (opts.showTelemetry) telemetry.draw(sim);
+  // 靜止時每秒仍刷新一次（避免一開始是空白）
+  if (opts.showTelemetry && telDue && (!quiet || now - lastTel > 1000)) { lastTel = now; telemetry.draw(sim); }
+  const tH1 = performance.now();
+  ema('phys', tP1 - tF0); ema('render', tR1 - tR0); ema('hud', tH1 - tR1); ema('frame', tH1 - tF0); ema('steps', steps);
+  perf.calls = renderer.info.render.calls; perf.tris = renderer.info.render.triangles; perf.rendered = renderedFrames; perf.pixelRatio = pixelRatio;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -276,3 +327,4 @@ $('loading').remove();
 (window as unknown as { __sim: Sim; __setView: (v: string) => void }).__sim = sim;
 (window as unknown as { __setView: (v: string) => void }).__setView = setView;
 (window as unknown as { __runTests: () => Promise<void> }).__runTests = runTests;
+(window as unknown as { __setLayout: (id: string) => void }).__setLayout = (id: string) => { opts.layout = id; rebuild(); refreshGui(); };

@@ -29,6 +29,11 @@ export class Firmware {
   secondClawUsed = false;
   private slackFrames = 0;
   attempts = 0;
+  /** 本輪累計投幣（NT$），出貨後歸零 */
+  credits = 0;
+  totalSpent = 0;
+  /** 本次夾取是否處於保夾（全力）狀態 */
+  guaranteeActive = false;
   onStateChange?: (s: FwState) => void;
 
   constructor(
@@ -37,6 +42,21 @@ export class Firmware {
     private prizesSleeping: () => boolean,
     private tension: () => number,
   ) {}
+
+  /** 保夾時用全力，否則用機板設定 */
+  power(k: 'P1' | 'P2' | 'P3' | 'P4'): number {
+    const c = this.prof.controller;
+    return this.guaranteeActive ? Math.max(c[k], c.guaranteePower) : c[k];
+  }
+  /** 出貨：保夾金額歸零 */
+  onPrizeWon() {
+    this.credits = 0;
+    this.guaranteeActive = false;
+  }
+  /** 距離保夾還差多少（NT$） */
+  creditsToGuarantee(): number {
+    return Math.max(0, Math.min(this.prof.controller.guaranteePrice, 790) - this.credits);
+  }
 
   private go(s: FwState) {
     this.state = s;
@@ -61,6 +81,9 @@ export class Firmware {
           m.cmdX = 0; m.cmdZ = 0;
           this.secondClawUsed = false;
           this.attempts++;
+          this.credits += c.pricePerPlay;
+          this.totalSpent += c.pricePerPlay;
+          this.guaranteeActive = c.guaranteeEnabled && this.credits >= Math.min(c.guaranteePrice, 790);
           this.go('descent');
         }
         break;
@@ -87,11 +110,11 @@ export class Firmware {
       }
       case 'close':
         m.winchCmd = 0;
-        m.solenoid.command = c.P1;
+        m.solenoid.command = this.power('P1');
         if (this.stateTime >= c.T1) this.go('lift');
         break;
       case 'lift':
-        m.solenoid.command = c.P2;
+        m.solenoid.command = this.power('P2');
         m.winchCmd = -1;
         if (m.cableLength <= p.cableMinLength + 1e-6) {
           m.winchCmd = 0;
@@ -99,11 +122,11 @@ export class Firmware {
         }
         break;
       case 'top':
-        m.solenoid.command = c.P3;
+        m.solenoid.command = this.power('P3');
         if (this.stateTime >= c.T3) this.go('return');
         break;
       case 'return': {
-        m.solenoid.command = c.P4;
+        m.solenoid.command = this.power('P4');
         m.autoTarget = v3(p.homeX, p.trolleyY, p.homeZ);
         const dx = Math.abs(m.trolleyPos.x - p.homeX), dz = Math.abs(m.trolleyPos.z - p.homeZ);
         const still = Math.abs(m.trolleyVel.x) + Math.abs(m.trolleyVel.z) < 1e-3;

@@ -2,7 +2,14 @@ import type { Sim, Telemetry } from '../sim/sim';
 import { ChartSpec, chartFrame, fmtNum, lineChartSVG } from '../sim/chart';
 import type { TestResult } from '../sim/tests';
 
-const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+// CSS 變數快取（getComputedStyle 每次呼叫都會觸發樣式計算），配色模式改變時清除
+const cssCache = new Map<string, string>();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => cssCache.clear());
+const css = (name: string) => {
+  let v = cssCache.get(name);
+  if (v === undefined) { v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); cssCache.set(name, v); }
+  return v;
+};
 
 /**
  * 即時遙測：三張小圖（各自一個 Y 軸，不用雙軸）＋滑鼠十字線讀值。
@@ -29,7 +36,9 @@ export class TelemetryPanel {
     if (!tel.length) return;
     const tEnd = tel[tel.length - 1].t;
     const tStart = tEnd - this.windowSec;
-    const data = tel.filter((d) => d.t >= tStart);
+    let i0 = tel.length - 1;
+    while (i0 > 0 && tel[i0 - 1].t >= tStart) i0--;
+    const data = tel.slice(i0);
     const rows: { title: string; unit: string; series: { name: string; get: (d: Telemetry) => number; color: string }[] }[] = [
       { title: '鋼索張力', unit: 'N', series: [{ name: '張力', get: (d) => d.tension, color: css('--s1') }] },
       { title: '電磁力（鐵芯）', unit: 'N', series: [{ name: '電磁力', get: (d) => d.solenoidForce, color: css('--s1') }] },

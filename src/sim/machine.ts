@@ -51,6 +51,7 @@ export class ClawMachine {
   plungerJoint!: RAPIER_NS.PrismaticImpulseJoint;
   /** 鋼索張力（N），由約束衝量直接求得 */
   tension = 0;
+  private prevAttach: V3 | null = null;
   clawColliders: RAPIER_NS.Collider[] = [];
   legColliders: RAPIER_NS.Collider[] = [];
   sensor!: RAPIER_NS.Collider;
@@ -258,6 +259,10 @@ export class ClawMachine {
   }
 
   // ---------------------------------------------------------------- queries
+  /** 只對爪子所在 island 加迭代，其餘（靜止的獎品）用較少迭代 */
+  applyExtraIterations(n: number) {
+    for (const b of this.allClawBodies()) b.setAdditionalSolverIterations(n);
+  }
   allClawBodies(): RAPIER_NS.RigidBody[] {
     return [this.head, this.plunger, ...this.legs, ...this.links];
   }
@@ -295,6 +300,7 @@ export class ClawMachine {
     this.trolleyPos.x = x; this.trolleyPos.z = z;
     this.trolleyVel = v3();
     this.trolley.setTranslation(this.trolleyPos, true);
+    this.prevAttach = null;
     for (const b of this.allClawBodies()) {
       const t = b.translation();
       b.setTranslation({ x: t.x + dx, y: t.y, z: t.z + dz }, true);
@@ -320,8 +326,12 @@ export class ClawMachine {
     const d = len(diff);
     if (d < 1e-6) { this.tension = 0; return; }
     const u = scale(diff, 1 / d);
-    const r = sub(attach, hp);
-    const vAttach = add(this.head.linvel(), cross(this.head.angvel(), r));
+    // 吊點速度用「實際位移 / dt」：Rapier 的位置修正不會寫回 linvel，
+    // 直接讀 linvel 會有假速度，讓鋼索在鬆弛時仍往上拉（爪子會被「吊高」）。
+    void hp;
+    const prev = this.prevAttach;
+    this.prevAttach = { ...attach };
+    const vAttach = prev ? scale(sub(attach, prev), 1 / dt) : v3();
     const vRel = sub(vAttach, this.trolleyVel);
     const g = v3(0, -p.gravity * dt, 0); // 本步重力造成的速度增量（預測）
     const Cdot = dot(u, add(vRel, g)) - this.winchVel;

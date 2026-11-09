@@ -1,12 +1,17 @@
 import * as THREE from 'three';
 import type { BoxSpec, PlushSpec, PrizeInstance, PartVisual } from '../sim/prizes';
 import { qFromYTo } from '../sim/math';
-import { boxFrontTexture, boxSideTexture, fabricBumpTexture } from './textures';
+import { boxFrontTexture, boxSideTexture, canLabelTexture, fabricBumpTexture, pillowFaceTexture } from './textures';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeStatic } from './merge';
 
 let bump: THREE.Texture | null = null;
+const fabricCache = new Map<number, THREE.MeshStandardMaterial>();
 const fabric = (color: number) => {
   bump ??= fabricBumpTexture();
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, bumpMap: bump, bumpScale: 0.6 });
+  let m = fabricCache.get(color);
+  if (!m) { m = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, bumpMap: bump, bumpScale: 0.6 }); fabricCache.set(color, m); }
+  return m;
 };
 const black = new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.3 });
 const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
@@ -15,8 +20,8 @@ const blush = new THREE.MeshStandardMaterial({ color: 0xff9aae, roughness: 0.9 }
 export class PrizeView {
   meshes: THREE.Object3D[] = [];
   constructor(public prize: PrizeInstance) {
-    if (prize.kind === 'box') this.meshes.push(buildBox(prize.spec as BoxSpec));
-    else for (const part of prize.parts) this.meshes.push(buildPlushPart(part.visual, prize.spec as PlushSpec));
+    if (prize.kind === 'box') this.meshes.push(mergeStatic(buildBox(prize.spec as BoxSpec)));
+    else for (const part of prize.parts) this.meshes.push(mergeStatic(buildPlushPart(part.visual, prize.spec as PlushSpec)));
   }
   update() {
     this.prize.parts.forEach((part, i) => {
@@ -27,9 +32,45 @@ export class PrizeView {
   }
 }
 
+let variantCounter = 0;
+const CAPSULE_COLORS = [0xff5c8a, 0x4cc3ff, 0xffc93c, 0x7bd389, 0xb48cff];
 function buildBox(spec: BoxSpec): THREE.Object3D {
   const { x: w, y: h, z: d } = spec.size;
   const g = new THREE.Group();
+  const variant = variantCounter++;
+  if (spec.art === 'can') {
+    // 罐裝飲料：側面標籤＋鋁蓋
+    const alu = new THREE.MeshStandardMaterial({ color: 0xd5d8dc, metalness: 0.9, roughness: 0.3 });
+    const label = new THREE.MeshStandardMaterial({ map: canLabelTexture(), metalness: 0.4, roughness: 0.35 });
+    const can = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, h, 24), [label, alu, alu]);
+    can.castShadow = true;
+    g.add(can);
+    return g;
+  }
+  if (spec.art === 'capsule') {
+    // 扭蛋殼：上半透明、下半彩色，內有小玩具
+    const r = w / 2;
+    const top = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false }));
+    const bottom = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshStandardMaterial({ color: CAPSULE_COLORS[variant % CAPSULE_COLORS.length], roughness: 0.35 }));
+    bottom.castShadow = true;
+    const toy = new THREE.Mesh(new THREE.SphereGeometry(r * 0.45, 12, 8), new THREE.MeshStandardMaterial({ color: CAPSULE_COLORS[(variant + 2) % CAPSULE_COLORS.length], roughness: 0.6 }));
+    toy.position.y = -r * 0.15;
+    g.add(bottom, toy, top);
+    return g;
+  }
+  if (spec.art === 'pillow') {
+    // 大頭抱枕：圓角布面＋前後原創貓臉
+    const body = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, Math.min(d, w) * 0.45), fabric([0xffe9c9, 0xe8f1ff, 0xffe3ee][variant % 3]));
+    body.castShadow = true;
+    g.add(body);
+    for (const side of [1, -1]) {
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.86, h * 0.86), new THREE.MeshStandardMaterial({ map: pillowFaceTexture(variant), roughness: 0.9, transparent: false }));
+      face.position.z = side * (d / 2 + 0.0015);
+      if (side < 0) face.rotation.y = Math.PI;
+      g.add(face);
+    }
+    return g;
+  }
   if (spec.art === 'figure') {
     // 標準透明盒：透明 PET 外殼＋背卡＋底座＋公仔（原創 Q 版角色）
     const shell = new THREE.Mesh(
@@ -96,6 +137,12 @@ function buildPlushPart(v: PartVisual, spec: PlushSpec): THREE.Object3D {
   main.castShadow = true;
   main.receiveShadow = true;
   g.add(main);
+  for (const e of v.extras ?? []) {
+    const em = capsuleOrBall({ ...v, shape: e.shape, radius: e.radius, halfHeight: e.halfHeight, dir: e.dir }, fabric(e.color));
+    em.position.set(e.offset.x, e.offset.y, e.offset.z);
+    em.castShadow = true;
+    g.add(em);
+  }
   const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, sc = 1) => {
     const mesh = new THREE.Mesh(geo, m);
     mesh.position.set(x * s, y * s, z * s);
